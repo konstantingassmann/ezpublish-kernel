@@ -64,6 +64,7 @@ branches:
     - "6.3"
     - "6.4"
     - "6.5"
+    - fix-urlalias-downgrade
 
 # setup requirements for running unit/integration/behat tests
 before_script:
