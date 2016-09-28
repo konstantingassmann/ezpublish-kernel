@@ -50,7 +50,7 @@ class CachedValue extends RestValue
         }
 
         // @todo make this extensible
-        $invalidTags = array_diff(array_keys($tags), array('location', 'content', 'content-type', 'parent'));
+        $invalidTags = array_diff(array_keys($tags), array('location', 'content', 'content-type', 'parent', 'path'));
         if (count($invalidTags) > 0) {
             throw new InvalidArgumentException(
                 'cacheTags',
