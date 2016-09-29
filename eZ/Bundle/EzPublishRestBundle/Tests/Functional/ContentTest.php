@@ -10,10 +10,13 @@
  */
 namespace eZ\Bundle\EzPublishRestBundle\Tests\Functional;
 
+use Buzz\Message\Response;
 use eZ\Bundle\EzPublishRestBundle\Tests\Functional\TestCase as RESTFunctionalTestCase;
 
 class ContentTest extends RESTFunctionalTestCase
 {
+    private $createdContentTypeId = 1;
+
     /**
      * @covers POST /content/objects
      *
@@ -26,7 +29,7 @@ class ContentTest extends RESTFunctionalTestCase
         $body = <<< XML
 <?xml version="1.0" encoding="UTF-8"?>
 <ContentCreate>
-  <ContentType href="/api/ezp/v2/content/types/1" />
+  <ContentType href="/api/ezp/v2/content/types/{$this->createdContentTypeId}" />
   <mainLanguageCode>eng-GB</mainLanguageCode>
   <LocationCreate>
     <ParentLocation href="/api/ezp/v2/content/locations/1/2" />
@@ -98,11 +101,29 @@ XML;
     public function testLoadContent($restContentHref)
     {
         $response = $this->sendHttpRequest(
-            $this->createHttpRequest('GET', $restContentHref)
+            $this->createHttpRequest('GET', $restContentHref, '', 'ContentInfo+json')
         );
 
         self::assertHttpResponseCodeEquals($response, 200);
-        // @todo test data a bit ?
+
+        return $response;
+    }
+
+    /**
+     * @depends testLoadContent
+     */
+    public function testLoadContentCacheTags(Response $response)
+    {
+        $responseStruct = json_decode($response->getContent(), true);
+
+        $this->assertHttpResponseHasCacheTags(
+            $response,
+            [
+                'location-' . $this->extractLastIdFromHref($responseStruct['Content']['MainLocation']['_href']),
+                'content-' . $responseStruct['Content']['_id'],
+                'content-type-' . $this->extractLastIdFromHref($responseStruct['Content']['ContentType']['_href']),
+            ]
+        );
     }
 
     /**
@@ -155,8 +176,14 @@ XML;
         );
 
         self::assertHttpResponseCodeEquals($response, 307);
-
         self::assertHttpResponseHasHeader($response, 'Location', "$restContentHref/versions/1");
+
+        $this->assertHttpResponseHasCacheTags(
+            $response,
+            [
+                'content-' . $this->extractLastIdFromHref($restContentHref),
+            ]
+        );
     }
 
     /**
@@ -168,12 +195,32 @@ XML;
     public function testLoadContentVersion($restContentVersionHref)
     {
         $response = $this->sendHttpRequest(
-            $this->createHttpRequest('GET', $restContentVersionHref)
+            $this->createHttpRequest('GET', $restContentVersionHref, '', 'Version+json')
         );
 
         self::assertHttpResponseCodeEquals($response, 200);
         // @todo test data
         // @todo test filtering (language, fields, etc)
+
+        return $response;
+    }
+
+    /**
+     * @depends testLoadContentVersion
+     */
+    public function testLoadContentVersionCacheTags(Response $response)
+    {
+        $responseStruct = json_decode($response->getContent(), true);
+
+        $this->assertHttpResponseHasCacheTags(
+            $response,
+            [
+                'content-' . $this->extractLastIdFromHref(
+                    $responseStruct['Version']['VersionInfo']['Content']['_href']
+                ),
+                'content-type-' . $this->createdContentTypeId,
+            ]
+        );
     }
 
     /**
@@ -319,6 +366,13 @@ XML;
         );
 
         self::assertHttpResponseCodeEquals($response, 200);
+
+        $this->assertHttpResponseHasCacheTags(
+            $response,
+            [
+                'content-' . $this->extractContentIdFromHref($restContentVersionHref),
+            ]
+        );
     }
 
     /**
@@ -360,7 +414,10 @@ XML;
 
         self::assertHttpResponseCodeEquals($response, 200);
 
-        // @todo test data
+        $this->assertHttpResponseHasCacheTags(
+            $response,
+            ['content-' . $this->extractContentIdFromHref($restContentRelationHref)]
+        );
     }
 
     /**
@@ -415,5 +472,67 @@ XML;
         // Returns 301 since 6.0 (deprecated in favour of /views)
         self::assertHttpResponseCodeEquals($response, 301);
         self::assertHttpResponseHasHeader($response, 'Location');
+    }
+
+    /**
+     * Asserts that $response has the given set of $cacheTags.
+     *
+     * @param Response $response
+     * @param array $expectedTags Example: ['content-42', 'location-300']
+     */
+    private function assertHttpResponseHasCacheTags(Response $response, $expectedTags)
+    {
+        $this->assertHttpResponseHasHeader($response, 'xkey');
+
+        $responseCacheTag = $response->getHeader('xkey');
+        foreach ($expectedTags as $expectedTag) {
+            $this->assertContains($expectedTag, $responseCacheTag);
+        }
+    }
+
+    /**
+     * Extracts and returns the last id from $href.
+     *
+     * @param string $href Ex: '/api/ezp/v2/content/objects/1'
+     * @return int Ex: 1
+     */
+    protected function extractLastIdFromHref($href)
+    {
+        $contentTypeHrefParts = explode('/', $href);
+
+        return (int)array_pop($contentTypeHrefParts);
+    }
+
+    private function extractPathFromHref($href)
+    {
+        $parts = array_filter(
+            explode('/', str_replace('/api/ezp/v2/', '', $href)),
+            function ($value) {
+                return is_numeric($value);
+            }
+        );
+
+        return $parts;
+    }
+
+    /**
+     * Extracts a content id from any href containing one.
+     *
+     * @param string $href Ex: /api/ezp/v2/content/objects/1/anything
+     * @return int
+     */
+    private function extractContentIdFromHref($href)
+    {
+        $contentId = null;
+        $leftOvers = null;
+
+        sscanf(
+            $href,
+            '/api/ezp/v2/content/objects/%d/%s',
+            $contentId,
+            $leftOvers
+        );
+
+        return $contentId;
     }
 }
